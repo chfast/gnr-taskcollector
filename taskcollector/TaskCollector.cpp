@@ -3,7 +3,6 @@
 #include <iostream>
 #include <memory>
 #include <string>
-#include <string.h>
 #include <vector>
 
 struct Deleter
@@ -290,16 +289,17 @@ main(int argc, char *argv[]) {
 	std::unique_ptr<TaskCollector> taskCollector;
 	std::unique_ptr<TaskCollector> alphaTaskCollector;
 
-	if (strcmp(argv[1], "add") == 0) {
+	std::string command{argv[1]};
+	if (command == "add") {
 		taskCollector = std::make_unique<AddTaskCollector>();
 		alphaTaskCollector = std::make_unique<AddTaskCollector>();
 	}
-	else if (strcmp(argv[1], "paste") == 0) {
+	else if (command == "paste") {
 		taskCollector = std::make_unique<PasteTaskCollector>();
 		alphaTaskCollector = std::make_unique<PasteTaskCollector>();
 	}
 	else {
-		std::cerr << "Possible types: 'add', 'paste'\n";
+		std::cerr << "Unknown command '" << command << "'. Allowed: 'add', 'paste'.\n";
 		return -1;
 	}
 
