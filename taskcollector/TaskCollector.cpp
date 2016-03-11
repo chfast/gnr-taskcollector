@@ -2,8 +2,6 @@
 #include <algorithm>
 #include <iostream>
 #include <memory>
-#include <stdlib.h>
-#include <stdio.h>
 #include <string>
 #include <string.h>
 #include <vector>
@@ -86,12 +84,11 @@ FreeImage error handler
 @param message Error message
 */
 void FreeImageErrorHandler(FREE_IMAGE_FORMAT fif, const char *message) {
-	printf("\n*** ");
+	std::cerr << "\n*** ";
 	if (fif != FIF_UNKNOWN) {
-		printf("%s Format\n", FreeImage_GetFormatFromFIF(fif));
+		std::cerr << FreeImage_GetFormatFromFIF(fif) << " Format\n";
 	}
-	printf(message);
-	printf(" ***\n");
+	std::cerr << message << " ***\n";
 }
 
 // ----------------------------------------------------------
@@ -152,7 +149,7 @@ public:
 			return nullptr;
 		}
 		if (showProgress) {
-			printf("Adding all accepted chunks to the final image\n");
+			std::cout << "Adding all accepted chunks to the final image\n";
 		}
 
 		const auto it = chunks.begin();
@@ -221,7 +218,7 @@ public:
 			return nullptr;
 		}
 		if (showProgress) {
-			printf("Adding all accepted chunks to the final image\n");
+			std::cout << "Adding all accepted chunks to the final image\n";
 		}
 		const auto it = chunks.begin();
 		const auto width = FreeImage_GetWidth(it->get());
@@ -282,13 +279,11 @@ main(int argc, char *argv[]) {
 	FreeImage_SetOutputMessage(FreeImageErrorHandler);
 
 	// print version & copyright infos
-	printf("FreeImage version : %s", FreeImage_GetVersion());
-	printf("\n");
-	printf(FreeImage_GetCopyrightMessage());
-	printf("\n");
+	std::cout << "FreeImage version : " << FreeImage_GetVersion() << "\n"
+	          << FreeImage_GetCopyrightMessage() << std::endl;
 
-	if (argc < 4)  {
-		printf("Usage: taskcollector.exe <type> <outputfile> <inputfile1> [<input file2> ...]\n");
+	if (argc < 4) {
+		std::cerr << "Usage: taskcollector.exe <type> <outputfile> <inputfile1> [<input file2> ...]\n";
 		return -1;
 	}
 
@@ -304,22 +299,22 @@ main(int argc, char *argv[]) {
 		alphaTaskCollector = std::make_unique<PasteTaskCollector>();
 	}
 	else {
-		printf("Possible types: 'add', 'paste'\n");
+		std::cerr << "Possible types: 'add', 'paste'\n";
 		return -1;
 	}
 
 	for (int i = 3; i < argc; ++i) {
 		if (std::string(argv[i]).find("Alpha") == std::string::npos) {
 			if (!taskCollector->addImgFile(argv[i])) {
-				printf("Can't add file: %s\n", argv[i]);
+				std::cerr << "Can't add file: " << argv[i] << "\n";
 			}
 		}
 		else {
 			if (!taskCollector->addAlphaFile(argv[i])) {
-				printf("Can't add file: %s\n", argv[i]);
+				std::cerr << "Can't add file: " << argv[i] << "\n";
 			}
 			if (!alphaTaskCollector->addImgFile(argv[i])) {
-				printf("Can't add file: %s\n", argv[i]);
+				std::cerr << "Can't add file: " << argv[i] << "\n";
 			}
 		}
 	}
