@@ -4,6 +4,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <algorithm>
 
 struct Deleter
 {
@@ -20,7 +21,7 @@ using bitmap_ptr = std::unique_ptr<FIBITMAP, Deleter>;
 @param flag Optional load flag constant
 @return Returns the loaded dib if successful, returns NULL otherwise
 */
-bitmap_ptr GenericLoader(const std::string& lpszPathName, int flag) {
+bitmap_ptr GenericLoader(const std::string& lpszPathName, int flag = 0) {
 	auto fif = FIF_UNKNOWN;
 
 	// check if file path is not empty
@@ -71,6 +72,9 @@ bool GenericWriter(const bitmap_ptr& dib, const std::string& lpszPathName, int f
 				std::cout << "Can't save file" << lpszPathName << std::endl;
 			}
 		}
+    else {
+      std::cerr << "Can't determine output file type" << std::endl;
+    }
 	}
 	return (bSuccess == TRUE);
 }
@@ -95,8 +99,10 @@ void FreeImageErrorHandler(FREE_IMAGE_FORMAT fif, const char *message) {
 class TaskCollector {
 
 protected:
-	std::vector<bitmap_ptr> chunks;
-	std::vector<bitmap_ptr> alphaChunks;
+	std::vector<std::string> chunks;
+	std::vector<std::string> alphaChunks;
+	unsigned int width;
+	unsigned int height;
 
 public:
 	TaskCollector() = default;
@@ -108,34 +114,34 @@ public:
 	}
 	~TaskCollector() = default;
 
-	bool addImgFile(const std::string& pathName, int flag = 0)  {
+	bool addImgFile(std::string pathName)  {
 		if (pathName.empty())
 			return false;
-		auto img = GenericLoader(pathName.c_str(), flag);
-		if (!img)
-			return false;
-		chunks.emplace_back(std::move(img));
+		chunks.emplace_back(std::move(pathName));
 		return true;
 	};
 
-	bool addAlphaFile(const std::string& pathName, int flag = 0) {
+	bool addAlphaFile(std::string pathName) {
 		if (pathName.empty())
 			return false;
-		auto img = GenericLoader(pathName.c_str(), flag);
-		if (!img)
-			return false;
-		alphaChunks.emplace_back(std::move(img));
+		alphaChunks.emplace_back(std::move(pathName));
 		return true;
 	};
 
 	virtual bitmap_ptr finalize(bool showProgress = false) = 0;
 
-	bool finalizeAndSave(const std::string& outputPath) {
+	bool finalizeAndSave(std::string outputPath) {
 		if (outputPath.empty())
 			return false;
-		std::cout << "finalize & safe " << outputPath << std::endl;
+		std::cout << "finalize & save " << outputPath << std::endl;
 		auto img = finalize();
-		return GenericWriter(img, outputPath, EXR_FLOAT);
+    return GenericWriter(img, outputPath, EXR_FLOAT);
+	};
+	void set_width(unsigned int w) {
+		width = w;
+	};
+	void set_height(unsigned int h) {
+		height = h;
 	};
 
 };
@@ -152,19 +158,22 @@ public:
 		}
 
 		const auto it = chunks.begin();
-		const auto width = FreeImage_GetWidth(it->get());
-		const auto height = FreeImage_GetHeight(it->get());
-		const auto type = FreeImage_GetImageType(it->get());
+		
+		bitmap_ptr firstChunk = GenericLoader(*it);
+		
+		const auto type = FreeImage_GetImageType(firstChunk.get());
+		
+		bitmap_ptr finalImage(FreeImage_Copy(firstChunk.get(), 0, height, width, 0));
 
-		bitmap_ptr finalImage(FreeImage_Copy(it->get(), 0, height, width, 0));
-
-		auto RGBChunkWorker = [=, &finalImage](const bitmap_ptr& el)
+		auto RGBChunkWorker = [=, &finalImage](const std::string& el)
 		{
-			for (unsigned int y = 0; y < height; ++y) {
-				auto srcbits = reinterpret_cast<FIRGBF *>(FreeImage_GetScanLine(el.get(), y));
+			bitmap_ptr chunk = GenericLoader(el);
+			auto chunkHeight = FreeImage_GetHeight(chunk.get());
+			for (unsigned int y = 0; y < chunkHeight; ++y) {
+				auto srcbits = reinterpret_cast<FIRGBF *>(FreeImage_GetScanLine(chunk.get(), y));
 				auto dstbits = reinterpret_cast<FIRGBF *>(FreeImage_GetScanLine(finalImage.get(), y));
 
-				for (unsigned int x = 0; x < width; ++x) {
+				for (unsigned int x = 0; x < this->width; ++x) {
 					dstbits[x].red += srcbits[x].red;
 					dstbits[x].blue += srcbits[x].blue;
 					dstbits[x].green += srcbits[x].green;
@@ -172,13 +181,15 @@ public:
 			}
 		};
 
-		auto RGBAChunkWorker = [=, &finalImage](const bitmap_ptr& el)
+		auto RGBAChunkWorker = [=, &finalImage](const std::string& el)
 		{
-			for (unsigned int y = 0; y < height; ++y) {
-				const auto srcbits = reinterpret_cast<FIRGBAF *>(FreeImage_GetScanLine(el.get(), y));
+			bitmap_ptr chunk = GenericLoader(el);
+			auto chunkHeight = FreeImage_GetHeight(chunk.get());
+			for (unsigned int y = 0; y < chunkHeight; ++y) {
+				const auto srcbits = reinterpret_cast<FIRGBAF *>(FreeImage_GetScanLine(chunk.get(), y));
 				auto dstbits = reinterpret_cast<FIRGBAF *>(FreeImage_GetScanLine(finalImage.get(), y));
 
-				for (unsigned int x = 0; x < width; ++x) {
+				for (unsigned int x = 0; x < this->width; ++x) {
 					dstbits[x].red += srcbits[x].red;
 					dstbits[x].blue += srcbits[x].blue;
 					dstbits[x].green += srcbits[x].green;
@@ -187,13 +198,15 @@ public:
 			}
 		};
 
-		auto alphaChunksWorker = [height, width, &finalImage](bitmap_ptr& el)
+		auto alphaChunksWorker = [this, &finalImage](const std::string& el)
 		{
-			for (unsigned int y = 0; y < height; ++y) {
-				const auto srcbits = (FIRGBAF *)FreeImage_GetScanLine(el.get(), y);
-				auto dstbits = (FIRGBAF *)FreeImage_GetScanLine(finalImage.get(), y);
+			bitmap_ptr chunk = GenericLoader(el);
+			auto chunkHeight = FreeImage_GetHeight(chunk.get());
+			for (unsigned int y = 0; y < chunkHeight; ++y) {
+				const auto srcbits = reinterpret_cast<FIRGBAF *>(FreeImage_GetScanLine(chunk.get(), y));
+				auto dstbits = reinterpret_cast<FIRGBAF *>(FreeImage_GetScanLine(finalImage.get(), y));
 
-				for (unsigned int x = 0; x < width; ++x) {
+				for (unsigned int x = 0; x < this->width; ++x) {
 					dstbits[x].alpha += srcbits[x].red + srcbits[x].blue + srcbits[x].green;
 				}
 			}
@@ -219,56 +232,35 @@ public:
 		if (showProgress) {
 			std::cout << "Adding all accepted chunks to the final image\n";
 		}
+		
 		const auto it = chunks.begin();
-		const auto width = FreeImage_GetWidth(it->get());
-		const auto chunkHeight = FreeImage_GetHeight(it->get());
-		const auto height = chunkHeight * chunks.size();
-		auto currentHeight = height - chunkHeight;
+		bitmap_ptr firstChunk = GenericLoader(*it);
+		
+		auto currentHeight = 0;
 
-		const auto type = FreeImage_GetImageType(it->get());
-		const auto bpp = FreeImage_GetBPP(it->get());
+		const auto type = FreeImage_GetImageType(firstChunk.get());
+		
+		const auto bpp = FreeImage_GetBPP(firstChunk.get());
+		
 		bitmap_ptr finalImage(FreeImage_AllocateT(type, width, height, bpp));
 
-		auto RGBChunkWorker = [=, &finalImage, &currentHeight](const bitmap_ptr& el)
+		auto RGBChunkWorker = [=, &finalImage, &currentHeight](const std::string& el)
 		{
-			for (unsigned int y = 0; y < chunkHeight; ++y) {
-				const auto srcbits = reinterpret_cast<FIRGBF *>(FreeImage_GetScanLine(el.get(), y));
-				auto dstbits = reinterpret_cast<FIRGBF *>(FreeImage_GetScanLine(finalImage.get(), y + currentHeight));
-				for (unsigned int x = 0; x < width; ++x) {
-					dstbits[x].red = srcbits[x].red;
-					dstbits[x].blue = srcbits[x].blue;
-					dstbits[x].green = srcbits[x].green;
-				}
+			bitmap_ptr chunk = GenericLoader(el);
+			auto chunkHeight = FreeImage_GetHeight(chunk.get());
+			auto chunk_img = FreeImage_Copy(chunk.get(), 0, 0, this->width, chunkHeight);
+			if (chunk_img) {
+				FreeImage_Paste(finalImage.get(), chunk_img, 0, currentHeight, 256);
 			}
-			currentHeight -= chunkHeight;
+			currentHeight += chunkHeight;
 		};
 
-		auto RGBAChunkWorker = [=, &finalImage, &currentHeight](const bitmap_ptr& el)
-		{
-			for (unsigned int y = 0; y < chunkHeight; ++y) {
-				const auto srcbits = reinterpret_cast<FIRGBAF *>(FreeImage_GetScanLine(el.get(), y));
-				auto dstbits = reinterpret_cast<FIRGBAF *>(FreeImage_GetScanLine(finalImage.get(), y + currentHeight));
-				for (unsigned int x = 0; x < width; ++x) {
-					dstbits[x].red = srcbits[x].red;
-					dstbits[x].blue = srcbits[x].blue;
-					dstbits[x].green = srcbits[x].green;
-					dstbits[x].alpha = srcbits[x].alpha;
-				}
-			}
-			currentHeight -= chunkHeight;
-		};
-
-		if (type == FIT_RGBF)
-			std::for_each(chunks.begin(), chunks.end(), RGBChunkWorker);
-		else if (type == FIT_RGBAF)
-			std::for_each(chunks.begin(), chunks.end(), RGBAChunkWorker);
-
+		std::for_each(chunks.begin(), chunks.end(), RGBChunkWorker);
 		return finalImage;
 	}
 };
 
-int
-main(int argc, char *argv[]) {
+int main(int argc, char *argv[]) {
 	// call this ONLY when linking with FreeImage as a static library
 #ifdef FREEIMAGE_LIB
 	FreeImage_Initialise();
@@ -282,28 +274,29 @@ main(int argc, char *argv[]) {
 	          << FreeImage_GetCopyrightMessage() << std::endl;
 
 	if (argc < 4) {
-		std::cerr << "Usage: taskcollector.exe <type> <outputfile> <inputfile1> [<input file2> ...]\n";
+		std::cerr << "Usage: taskcollector.exe <type> <width> <height> <outputfile> <inputfile1> [<input file2> ...]\n";
 		return -1;
 	}
 
 	std::unique_ptr<TaskCollector> taskCollector;
-	std::unique_ptr<TaskCollector> alphaTaskCollector;
 
 	std::string command{argv[1]};
 	if (command == "add") {
 		taskCollector = std::make_unique<AddTaskCollector>();
-		alphaTaskCollector = std::make_unique<AddTaskCollector>();
 	}
 	else if (command == "paste") {
 		taskCollector = std::make_unique<PasteTaskCollector>();
-		alphaTaskCollector = std::make_unique<PasteTaskCollector>();
 	}
 	else {
 		std::cerr << "Unknown command '" << command << "'. Allowed: 'add', 'paste'.\n";
 		return -1;
 	}
+	taskCollector->set_width(std::stoi(argv[2]));
+	taskCollector->set_height(std::stoi(argv[3]));
+	//to be sure the ordering is proper
+	std::sort(argv + 5, argv + argc);
 
-	for (int i = 3; i < argc; ++i) {
+	for (int i = 5; i < argc; ++i) {
 		if (std::string(argv[i]).find("Alpha") == std::string::npos) {
 			if (!taskCollector->addImgFile(argv[i])) {
 				std::cerr << "Can't add file: " << argv[i] << "\n";
@@ -313,22 +306,20 @@ main(int argc, char *argv[]) {
 			if (!taskCollector->addAlphaFile(argv[i])) {
 				std::cerr << "Can't add file: " << argv[i] << "\n";
 			}
-			if (!alphaTaskCollector->addImgFile(argv[i])) {
-				std::cerr << "Can't add file: " << argv[i] << "\n";
-			}
 		}
 	}
 
-	std::string name(argv[2]);
+	std::string name{argv[4]};
 	auto it = name.find_last_of('.');
 	name = ( (it == std::string::npos) ? (name + ".exr") : (name.substr(0, it) + ".Alpha.exr") );
 
-	taskCollector->finalizeAndSave(argv[2]);
-	alphaTaskCollector->finalizeAndSave(name);
+  bool saved = taskCollector->finalizeAndSave(argv[4]);
 	// call this ONLY when linking with FreeImage as a static library
 #ifdef FREEIMAGE_LIB
 	FreeImage_DeInitialise();
 #endif // FREEIMAGE_LIB
-
-	return 0;
+  if (saved)
+    return 0;
+  else
+    return 1;
 }
