@@ -5,7 +5,7 @@ ifeq ($(UNAME), Darwin)
 	LDFLAGS=-lfreeimage
 else
 	CXX=g++-5
-	LDFLAGS=-Bstatic -L /usr/lib/libfreeimage.so -lfreeimage
+	LDFLAGS=-static -L /usr/lib/libfreeimage.so -lfreeimage
 endif
 
 CXXFLAGS=-std=c++14 -Wall -Wextra -O2 -g
