@@ -1,5 +1,13 @@
-CXX=g++-5
-LDFLAGS=-static -L /usr/lib/libfreeimage.so -lfreeimage
+UNAME := $(shell uname)
+
+ifeq ($(UNAME), Darwin)
+	CXX=g++
+	LDFLAGS=-lfreeimage
+else
+	CXX=g++-5
+	LDFLAGS=-static -L /usr/lib/libfreeimage.so -lfreeimage
+endif
+
 CXXFLAGS=-std=c++14 -Wall -Wextra -O2 -g
 
 .PHONY: all clean
@@ -7,7 +15,7 @@ CXXFLAGS=-std=c++14 -Wall -Wextra -O2 -g
 all: Release/taskcollector
 
 clean:
-	rm -f Release/taskcollector
+	rm -f ../Release/taskcollector
 
 Release/taskcollector: TaskCollector.cpp
-	$(CXX) $(CXXFLAGS) $< $(LDFLAGS) -o $@
+	$(CXX) $(CXXFLAGS) $< $(LDFLAGS) -o ../$@
